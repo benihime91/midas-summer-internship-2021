@@ -194,12 +194,5 @@ class xResModel(nn.Sequential):
             OrderedDict(pool=nn.AdaptiveAvgPool2d(1), flatten=nn.Flatten())
         )
         fc = nn.Sequential(nn.Dropout(0.25), nn.Linear(256, num_outputs))
-        layers = OrderedDict(
-            stem=conv_stem,
-            block1=block1,
-            block2=block2,
-            block3=block3,
-            pool_flatten=pool_flatten,
-            fc=fc,
-        )
-        super(xResModel, self).__init__(layers)
+        backbone = nn.Sequential(conv_stem, block1, block2, block3, pool_flatten)
+        super(xResModel, self).__init__(OrderedDict(backbone=backbone, fc=fc))

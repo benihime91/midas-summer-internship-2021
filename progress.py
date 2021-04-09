@@ -325,8 +325,6 @@ class NotebookProgressCallback(ProgressBarBase):
 
         if self.training_tracker is not None:
             for k, v in metrics.items():
-                # splits = k.split("_")
-                # name = " ".join([part.capitalize() for part in splits])
                 name = str(k)
                 if isinstance(v, torch.Tensor):
                     values[name] = v.data.cpu().numpy().item()
@@ -347,6 +345,11 @@ class NotebookProgressCallback(ProgressBarBase):
             self.training_tracker.remove_child()
             self.prediction_bar = None
             self._force_next_update = True
+
+    def on_train_epoch_end(self, trainer, pl_module, outputs: Any) -> None:
+        super().on_train_epoch_end(trainer, pl_module, outputs)
+        if trainer.val_dataloaders is None:
+            self.on_validation_end(trainer, pl_module)
 
     def on_train_end(self, trainer, pl_module):
         super().on_train_end(trainer, pl_module)
