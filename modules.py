@@ -1,9 +1,33 @@
 from typing import *
 
 import pytorch_lightning as pl
+import pytorch_lightning.metrics.functional as FM
 import torch
 import torch.nn.functional as F
+from fastcore.all import *
 from torch import nn, optim
+
+
+class LabelSmoothingCrossEntropy(nn.Module):
+    "Cross Entropy Loss with Label Smoothing"
+
+    def __init__(self, eps=0.1, reduction: str = "mean", weight=None):
+        super(LabelSmoothingCrossEntropy, self).__init__()
+        store_attr("eps, reduction, weight")
+
+    def forward(self, input, target):
+        c = input.size()[1]
+        log_preds = F.log_softmax(input, dim=1)
+        if self.reduction == "sum":
+            loss = -log_preds.sum()
+        else:
+            loss = -log_preds.sum(dim=1)
+            if self.reduction == "mean":
+                loss = loss.mean()
+        loss = loss * self.eps / c + (1 - self.eps) * F.nll_loss(
+            log_preds, target.long(), weight=self.weight, reduction=self.reduction
+        )
+        return loss
 
 
 class ConvBnDropBlock(nn.Sequential):
@@ -206,13 +230,7 @@ class xResModel(nn.Sequential):
 
 
 class ClassificationTask(pl.LightningModule):
-    def __init__(
-        self,
-        model: nn.Module,
-        lr: float,
-        wd: float = 0,
-        criterion: nn.Module = nn.CrossEntropyLoss(),
-    ):
+    def __init__(self, model, lr=1e-03, wd=0.3, criterion=LabelSmoothingCrossEntropy(eps=0.1)):
         super().__init__()
         self.save_hyperparameters("lr", "wd")
         self.model = model
