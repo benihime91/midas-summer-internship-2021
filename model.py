@@ -1,9 +1,9 @@
 from typing import *
 
+import pytorch_lightning as pl
 import torch
 import torch.nn.functional as F
 from torch import nn, optim
-from torch.nn.utils import spectral_norm
 
 
 class ConvBnDropBlock(nn.Sequential):
@@ -194,5 +194,77 @@ class xResModel(nn.Sequential):
             OrderedDict(pool=nn.AdaptiveAvgPool2d(1), flatten=nn.Flatten())
         )
         fc = nn.Sequential(nn.Dropout(0.25), nn.Linear(256, num_outputs))
-        backbone = nn.Sequential(conv_stem, block1, block2, block3, pool_flatten)
-        super(xResModel, self).__init__(OrderedDict(backbone=backbone, fc=fc))
+        layers = OrderedDict(
+            stem=conv_stem,
+            block1=block1,
+            block2=block2,
+            block3=block3,
+            pool_flatten=pool_flatten,
+            fc=fc,
+        )
+        super(xResModel, self).__init__(layers)
+
+
+class ClassificationTask(pl.LightningModule):
+    def __init__(
+        self,
+        model: nn.Module,
+        lr: float,
+        wd: float = 0,
+        criterion: nn.Module = nn.CrossEntropyLoss(),
+    ):
+        super().__init__()
+        self.save_hyperparameters("lr", "wd")
+        self.model = model
+        self.criterion = criterion
+
+    def forward(self, xb):
+        "Same as nn.Module forward"
+        return self.model(xb)
+
+    def shared_step(self, batch, batch_idx, *args, **kwargs):
+        """
+        The common step shared between the training, validation & test steps
+        """
+        x, y = batch
+        y_hat = self.model(x)
+        loss = self.criterion(y_hat, y)
+        acc = FM.accuracy(F.softmax(y_hat), y)
+        metrics = {"accuracy": acc, "loss": loss}
+        return metrics
+
+    def training_step(self, batch, batch_idx, *args, **kwargs):
+        metrics = self.shared_step(batch, batch_idx, *args, **kwargs)
+        metrics = {"train_acc": metrics["accuracy"], "train_loss": metrics["loss"]}
+        self.log_dict(metrics)
+        return metrics["train_loss"]
+
+    def validation_step(self, batch, batch_idx, *args, **kwargs):
+        metrics = self.shared_step(batch, batch_idx, *args, **kwargs)
+        metrics = {"val_acc": metrics["accuracy"], "val_loss": metrics["loss"]}
+        self.log_dict(metrics)
+
+    def test_step(self, batch, batch_idx, *args, **kwargs):
+        metrics = self.shared_step(batch, batch_idx, *args, **kwargs)
+        metrics = {"test_acc": metrics["accuracy"], "test_loss": metrics["loss"]}
+        self.log_dict(metrics)
+
+    def configure_optimizers(self):
+        """
+        define optimizers and LR schedulers for use in training.
+        """
+        # default Adam parameters from fast.ai
+        opt = optim.AdamW(
+            self.parameters(),
+            lr=self.hparams.lr,
+            weight_decay=self.hparams.wd,
+            betas=(0.9, 0.99),
+            eps=1e-05,
+        )
+        steps = len(self.train_dataloader())
+        epochs = self.trainer.max_epochs
+
+        scheduler = optim.lr_scheduler.OneCycleLR(
+            opt, max_lr=self.hparams.lr, epochs=epochs, steps_per_epoch=steps
+        )
+        return [opt], [dict(scheduler=scheduler, interval="step")]
